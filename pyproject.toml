@@ -1,0 +1,35 @@
+[project]
+name = "shorts-factory"
+version = "0.1.0"
+description = "Sistema local de auto-generación y auto-publicación de Reels/Shorts"
+authors = [{ name = "Javier Jarquín Chooc", email = "javier.jarquin.chooc@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "typer (>=0.15,<1.0)",
+    "python-dotenv (>=1.0,<2.0)",
+    "yt-dlp (>=2026.7.4,<2027.0.0)",
+    "faster-whisper (>=1.2.1,<2.0.0)",
+    "librosa (>=0.11.0,<0.12.0)",
+    "scenedetect (>=0.7,<0.8)",
+    "opencv-python-headless (>=5.0.0.93,<6.0.0.0)",
+    "numpy (>=1.26,<3)",
+    "numba (>=0.60)",
+    "llvmlite (>=0.43)",
+    "requests (>=2.34.2,<3.0.0)",
+    "customtkinter (>=6.0.0,<7.0.0)",
+]
+
+[project.scripts]
+shorts-factory = "shorts_factory.cli.main:app"
+shorts-factory-gui = "shorts_factory.gui.app:main"
+
+[tool.poetry]
+packages = [{ include = "shorts_factory", from = "src" }]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+
+[build-system]
+requires = ["poetry-core>=2.0"]
+build-backend = "poetry.core.masonry.api"

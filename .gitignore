@@ -1,0 +1,17 @@
+# Entornos y dependencias
+.venv/
+__pycache__/
+*.py[cod]
+dist/
+*.egg-info/
+
+# Configuración local y datos
+.env
+data/
+*.db
+*.db-journal
+*.log
+
+# Herramientas
+.pytest_cache/
+.ruff_cache/
