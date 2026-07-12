@@ -12,10 +12,17 @@ from shorts_factory.ports.video_processor import VideoProcessorPort
 
 logger = logging.getLogger(__name__)
 
-# Recorte centrado a 9:16 con dimensiones pares (los encoders exigen ancho/alto par)
-_VERTICAL_FILTER = (
-    "crop=w='trunc(min(iw\\,ih*9/16)/2)*2':h='trunc(min(ih\\,iw*16/9)/2)*2',"
-    "scale=1080:1920"
+# 9:16 sin recortar contenido: el cuadro completo se escala para caber (contain)
+# sobre un fondo del mismo video, ampliado a cubrir el lienzo y difuminado. Un
+# crop central puro descartaría ~68% del ancho en fuentes 16:9 — suficiente para
+# cortar títulos, subtítulos incrustados o pantallas compartidas por los bordes.
+_VERTICAL_FILTER_COMPLEX = (
+    "[0:v]split=2[bg][fg];"
+    "[bg]scale=1080:1920:force_original_aspect_ratio=increase,"
+    "crop=1080:1920,gblur=sigma=20,eq=brightness=-0.1[bg];"
+    "[fg]scale=1080:1920:force_original_aspect_ratio=decrease,"
+    "pad=ceil(iw/2)*2:ceil(ih/2)*2[fg];"
+    "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]"
 )
 
 
@@ -94,7 +101,14 @@ class FFmpegProcessor(VideoProcessorPort):
 
     def to_vertical(self, source: Path, dest: Path) -> Path:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        self._run_encode(["-i", str(source), "-vf", _VERTICAL_FILTER], [str(dest)])
+        self._run_encode(
+            [
+                "-i", str(source),
+                "-filter_complex", _VERTICAL_FILTER_COMPLEX,
+                "-map", "[vout]", "-map", "0:a?",
+            ],
+            [str(dest)],
+        )
         return dest
 
     def cut_vertical(
@@ -105,7 +119,8 @@ class FFmpegProcessor(VideoProcessorPort):
         self._run_encode(
             [
                 "-ss", f"{start_seconds:.3f}", "-to", f"{end_seconds:.3f}", "-i", str(source),
-                "-vf", _VERTICAL_FILTER,
+                "-filter_complex", _VERTICAL_FILTER_COMPLEX,
+                "-map", "[vout]", "-map", "0:a?",
             ],
             [str(dest)],
         )

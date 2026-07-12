@@ -39,6 +39,7 @@ class Settings:
     meta_app_secret: str | None
     meta_page_id: str | None
     meta_page_access_token: str | None
+    meta_user_access_token: str | None
     meta_ig_user_id: str | None
     # TikTok: OAuth2 con refresh (access 24h); el refresh token rota
     tiktok_client_key: str | None
@@ -90,6 +91,7 @@ def load_settings() -> Settings:
         meta_app_secret=os.getenv("SF_META_APP_SECRET") or None,
         meta_page_id=os.getenv("SF_META_PAGE_ID") or None,
         meta_page_access_token=os.getenv("SF_META_PAGE_ACCESS_TOKEN") or None,
+        meta_user_access_token=os.getenv("SF_META_USER_ACCESS_TOKEN") or None,
         meta_ig_user_id=os.getenv("SF_META_IG_USER_ID") or None,
         tiktok_client_key=os.getenv("SF_TIKTOK_CLIENT_KEY") or None,
         tiktok_client_secret=os.getenv("SF_TIKTOK_CLIENT_SECRET") or None,

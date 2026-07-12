@@ -87,6 +87,13 @@ class SettingsWindow(ctk.CTkToplevel):
             "SF_META_PAGE_ACCESS_TOKEN",
             secret=True,
         )
+        self._field(
+            scroll,
+            "User Access Token (para renovación automática — mismo intercambio"
+            " que dio el Page Access Token)",
+            "SF_META_USER_ACCESS_TOKEN",
+            secret=True,
+        )
         self._field(scroll, "IG User ID (cuenta empresa/creador)", "SF_META_IG_USER_ID")
         self._field(scroll, "Versión de Graph API", "SF_META_GRAPH_VERSION", default="v23.0")
 

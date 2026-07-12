@@ -47,12 +47,25 @@ class FasterWhisperEngine(InferenceEngine):
     def transcribe(self, media_path: Path, language: str | None = None) -> list[TranscriptSegment]:
         model = self._load_model()
         segments, info = model.transcribe(str(media_path), language=language, vad_filter=True)
-        result = [
-            TranscriptSegment(
-                start_seconds=float(s.start), end_seconds=float(s.end), text=s.text.strip()
+        logger.info(
+            "Transcribiendo %s (~%.0fs de audio, %s)…",
+            media_path.name, info.duration, language or "detectando idioma",
+        )
+        result: list[TranscriptSegment] = []
+        last_logged = 0.0
+        for s in segments:
+            result.append(
+                TranscriptSegment(
+                    start_seconds=float(s.start), end_seconds=float(s.end), text=s.text.strip()
+                )
             )
-            for s in segments
-        ]
+            # Progreso cada ~30s de audio procesado: con cientos de segmentos por
+            # video, loguear uno por uno inundaría el log sin aportar señal.
+            if s.end - last_logged >= 30:
+                logger.info(
+                    "  %s: %.0fs / %.0fs transcritos", media_path.name, s.end, info.duration
+                )
+                last_logged = s.end
         logger.info(
             "Transcrito %s: %d segmentos, idioma %s", media_path.name, len(result), info.language
         )

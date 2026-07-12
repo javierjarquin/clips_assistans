@@ -134,6 +134,34 @@ def test_one_platform_failure_does_not_block_others(env) -> None:
     assert [p.platform for p in report.failed] == [Platform.TIKTOK]
 
 
+def test_execute_with_clip_id_publishes_only_that_clip(conn: sqlite3.Connection, tmp_path: Path) -> None:
+    channels = SqliteChannelRepository(conn)
+    videos = SqliteVideoRepository(conn)
+    moments = SqliteMomentRepository(conn)
+    clips = SqliteClipRepository(conn)
+    log = SqlitePublishLogRepository(conn)
+
+    channel = channels.add(Channel(youtube_channel_id="UC1", name="Canal"))
+    video = videos.add(Video(channel_id=channel.id, youtube_video_id="v1", title="Video"))
+    moment = moments.add(Moment(video_id=video.id, start_seconds=0, end_seconds=10, impact_score=1))
+    file_a = tmp_path / "a.mp4"
+    file_a.write_bytes(b"a")
+    file_b = tmp_path / "b.mp4"
+    file_b.write_bytes(b"b")
+    clip_a = clips.add(Clip(moment_id=moment.id, file_path=str(file_a), status=ClipStatus.READY))
+    clip_b = clips.add(Clip(moment_id=moment.id, file_path=str(file_b), status=ClipStatus.READY))
+
+    publisher = FakePublisher(Platform.FACEBOOK)
+    use_case = PublishClips(clips, moments, videos, log, publishers={Platform.FACEBOOK: publisher})
+
+    report = use_case.execute(clip_id=clip_a.id)
+
+    assert report.enqueued == 1
+    assert len(publisher.calls) == 1
+    # el segundo clip sigue sin publicación pendiente: no se tocó
+    assert log.list_by_clip(clip_b.id) == []
+
+
 def test_strip_links_removes_urls() -> None:
     result = strip_links("Mira esto https://ejemplo.com/x y www.otro.com fin")
     assert "http" not in result and "ejemplo.com" not in result and "otro.com" not in result

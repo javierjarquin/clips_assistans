@@ -53,14 +53,20 @@ class PublishClips:
         self._priorities = priorities or {}
         self._max_retries = max_retries
 
-    def execute(self) -> PublishReport:
+    def execute(self, clip_id: int | None = None) -> PublishReport:
+        """clip_id restringe la corrida a un solo clip (panel de publicación manual).
+
+        Sin clip_id, procesa todos los clips listos (uso desatendido/CLI).
+        """
         report = PublishReport()
-        self._enqueue_ready_clips(report)
-        self._process_pending(report)
+        self._enqueue_ready_clips(report, clip_id)
+        self._process_pending(report, clip_id)
         return report
 
-    def _enqueue_ready_clips(self, report: PublishReport) -> None:
+    def _enqueue_ready_clips(self, report: PublishReport, clip_id: int | None) -> None:
         for clip in self._clips.list_by_status(ClipStatus.READY):
+            if clip_id is not None and clip.id != clip_id:
+                continue
             existing = {p.platform for p in self._log.list_by_clip(clip.id)}
             for platform in self._publishers:
                 if platform in existing:
@@ -74,8 +80,10 @@ class PublishClips:
                 )
                 report.enqueued += 1
 
-    def _process_pending(self, report: PublishReport) -> None:
+    def _process_pending(self, report: PublishReport, clip_id: int | None) -> None:
         for publication in self._log.list_by_status(PublicationStatus.PENDING):
+            if clip_id is not None and publication.clip_id != clip_id:
+                continue
             publisher = self._publishers.get(publication.platform)
             if publisher is None:
                 continue

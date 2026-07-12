@@ -69,6 +69,18 @@ class SqliteChannelRepository(ChannelRepository):
         )
         self._conn.commit()
 
+    def remove(self, channel_id: int) -> bool:
+        try:
+            self._conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
+            self._conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Tiene videos asociados (FK): desactivar en vez de borrar para no perder histórico
+            self._conn.rollback()
+            self._conn.execute("UPDATE channels SET active = 0 WHERE id = ?", (channel_id,))
+            self._conn.commit()
+            return False
+
     @staticmethod
     def _to_entity(row: sqlite3.Row) -> Channel:
         return Channel(
@@ -120,8 +132,29 @@ class SqliteVideoRepository(VideoRepository):
         )
         return [self._to_entity(r) for r in rows]
 
+    def list_all(self) -> list[Video]:
+        rows = self._conn.execute("SELECT * FROM videos ORDER BY id")
+        return [self._to_entity(r) for r in rows]
+
     def update_status(self, video_id: int, status: VideoStatus) -> None:
         self._conn.execute("UPDATE videos SET status = ? WHERE id = ?", (status.value, video_id))
+        self._conn.commit()
+
+    def remove(self, video_id: int) -> None:
+        self._conn.execute(
+            "DELETE FROM publish_log WHERE clip_id IN ("
+            " SELECT clips.id FROM clips"
+            " JOIN moments ON moments.id = clips.moment_id"
+            " WHERE moments.video_id = ?)",
+            (video_id,),
+        )
+        self._conn.execute(
+            "DELETE FROM clips WHERE moment_id IN (SELECT id FROM moments WHERE video_id = ?)",
+            (video_id,),
+        )
+        self._conn.execute("DELETE FROM moments WHERE video_id = ?", (video_id,))
+        self._conn.execute("DELETE FROM downloads WHERE video_id = ?", (video_id,))
+        self._conn.execute("DELETE FROM videos WHERE id = ?", (video_id,))
         self._conn.commit()
 
     @staticmethod
@@ -275,6 +308,20 @@ class SqliteClipRepository(ClipRepository):
             "SELECT * FROM clips WHERE status = ? ORDER BY id", (status.value,)
         )
         return [self._to_entity(r) for r in rows]
+
+    def list_by_video(self, video_id: int) -> list[Clip]:
+        rows = self._conn.execute(
+            "SELECT clips.* FROM clips"
+            " JOIN moments ON moments.id = clips.moment_id"
+            " WHERE moments.video_id = ? ORDER BY clips.id",
+            (video_id,),
+        )
+        return [self._to_entity(r) for r in rows]
+
+    def remove(self, clip_id: int) -> None:
+        self._conn.execute("DELETE FROM publish_log WHERE clip_id = ?", (clip_id,))
+        self._conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
+        self._conn.commit()
 
     @staticmethod
     def _to_entity(row: sqlite3.Row) -> Clip:
