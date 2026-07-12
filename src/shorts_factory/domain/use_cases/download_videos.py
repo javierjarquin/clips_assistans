@@ -59,6 +59,7 @@ class DownloadVideos:
         dest = self._data_dir / channel_slug / video.youtube_video_id / "raw.mp4"
 
         self._videos.update_status(video.id, VideoStatus.DOWNLOADING)
+        logger.info("Descargando %s: %s", video.youtube_video_id, video.title)
         try:
             outcome = self._source.download(video.youtube_video_id, dest)
         except Exception as exc:  # noqa: BLE001 — el fallo se registra, no tumba el lote

@@ -24,6 +24,14 @@ class ChannelRepository(ABC):
     @abstractmethod
     def update_last_video(self, channel_id: int, youtube_video_id: str) -> None: ...
 
+    @abstractmethod
+    def remove(self, channel_id: int) -> bool:
+        """Borra el canal. Si tiene videos asociados (FK), lo desactiva en su lugar.
+
+        Devuelve True si se borró, False si se desactivó.
+        """
+        ...
+
 
 class VideoRepository(ABC):
     @abstractmethod
@@ -39,7 +47,15 @@ class VideoRepository(ABC):
     def list_by_status(self, status: VideoStatus) -> list[Video]: ...
 
     @abstractmethod
+    def list_all(self) -> list[Video]: ...
+
+    @abstractmethod
     def update_status(self, video_id: int, status: VideoStatus) -> None: ...
+
+    @abstractmethod
+    def remove(self, video_id: int) -> None:
+        """Borra el video y en cascada sus downloads/moments/clips/publish_log."""
+        ...
 
 
 class DownloadRepository(ABC):
@@ -79,6 +95,14 @@ class ClipRepository(ABC):
 
     @abstractmethod
     def list_by_status(self, status: ClipStatus) -> list[Clip]: ...
+
+    @abstractmethod
+    def list_by_video(self, video_id: int) -> list[Clip]: ...
+
+    @abstractmethod
+    def remove(self, clip_id: int) -> None:
+        """Borra el clip y sus registros de publish_log asociados."""
+        ...
 
 
 class PublishLogRepository(ABC):

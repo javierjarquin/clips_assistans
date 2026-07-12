@@ -88,9 +88,38 @@ class App(ctk.CTk):
         self._channel_name.pack(padx=12, pady=2, fill="x")
         self._channel_niche = ctk.CTkEntry(left, placeholder_text="Nicho (opcional)")
         self._channel_niche.pack(padx=12, pady=2, fill="x")
+        self._channel_include_latest = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            left, text="Encolar el video más reciente ya (para probar)",
+            variable=self._channel_include_latest, font=("", 11),
+        ).pack(anchor="w", padx=12, pady=(2, 4))
         add_btn = ctk.CTkButton(left, text="Agregar canal", command=self._on_add_channel)
-        add_btn.pack(padx=12, pady=(4, 12), fill="x")
+        add_btn.pack(padx=12, pady=(0, 4), fill="x")
         self._action_buttons.append(add_btn)
+
+        remove_row = ctk.CTkFrame(left, fg_color="transparent")
+        remove_row.pack(padx=12, pady=(0, 12), fill="x")
+        remove_row.grid_columnconfigure(0, weight=1)
+        self._channel_remove_id = ctk.CTkEntry(remove_row, placeholder_text="ID a eliminar")
+        self._channel_remove_id.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        remove_btn = ctk.CTkButton(
+            remove_row, text="Eliminar", width=80, fg_color="#8b2f2f",
+            hover_color="#6e2424", command=self._on_remove_channel,
+        )
+        remove_btn.grid(row=0, column=1)
+        self._action_buttons.append(remove_btn)
+
+        bootstrap_row = ctk.CTkFrame(left, fg_color="transparent")
+        bootstrap_row.pack(padx=12, pady=(0, 12), fill="x")
+        bootstrap_row.grid_columnconfigure(0, weight=1)
+        self._channel_bootstrap_id = ctk.CTkEntry(bootstrap_row, placeholder_text="ID para encolar último video")
+        self._channel_bootstrap_id.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        bootstrap_btn = ctk.CTkButton(
+            bootstrap_row, text="Encolar", width=80,
+            command=self._on_bootstrap_from_field,
+        )
+        bootstrap_btn.grid(row=0, column=1)
+        self._action_buttons.append(bootstrap_btn)
 
         ctk.CTkLabel(left, text="Pipeline", font=("", 16, "bold")).pack(
             anchor="w", padx=12, pady=(4, 4)
@@ -107,9 +136,17 @@ class App(ctk.CTk):
             self._action_buttons.append(btn)
 
         ctk.CTkButton(
+            left, text="📋 Publicar clips (manual)", fg_color="gray30",
+            command=self._open_publish_panel,
+        ).pack(padx=12, pady=(10, 3), fill="x")
+        ctk.CTkButton(
+            left, text="🗂 Gestionar archivos", fg_color="gray30",
+            command=self._open_media_panel,
+        ).pack(padx=12, pady=(3, 3), fill="x")
+        ctk.CTkButton(
             left, text="Abrir carpeta de clips", fg_color="gray30",
             command=self._open_data_dir,
-        ).pack(padx=12, pady=(10, 3), fill="x")
+        ).pack(padx=12, pady=(3, 3), fill="x")
         ctk.CTkButton(
             left, text="⚙  Configuración", fg_color="gray30",
             command=self._open_settings,
@@ -175,8 +212,9 @@ class App(ctk.CTk):
         self._channels_box.delete("1.0", "end")
         if channels:
             for ch in channels:
+                estado = "" if ch.active else " [inactivo]"
                 self._channels_box.insert(
-                    "end", f"• {ch.name} ({ch.youtube_channel_id})\n"
+                    "end", f"#{ch.id} {ch.name} ({ch.youtube_channel_id}){estado}\n"
                 )
         else:
             self._channels_box.insert("end", "Sin canales registrados")
@@ -209,6 +247,16 @@ class App(ctk.CTk):
 
         SettingsWindow(self, on_saved=on_saved)
 
+    def _open_publish_panel(self) -> None:
+        from shorts_factory.gui.publish_panel import PublishPanel
+
+        PublishPanel(self)
+
+    def _open_media_panel(self) -> None:
+        from shorts_factory.gui.media_panel import MediaPanel
+
+        MediaPanel(self)
+
     def _open_data_dir(self) -> None:
         data_dir = load_settings().data_dir
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -237,6 +285,7 @@ class App(ctk.CTk):
         channel_id = self._channel_id.get().strip()
         name = self._channel_name.get().strip()
         niche = self._channel_niche.get().strip() or None
+        include_latest = self._channel_include_latest.get()
         if not channel_id or not name:
             self._log("Faltan datos: canal y nombre son obligatorios.")
             return
@@ -250,23 +299,62 @@ class App(ctk.CTk):
         self._channel_id.delete(0, "end")
         self._channel_name.delete(0, "end")
         self._channel_niche.delete(0, "end")
+        self._channel_include_latest.set(False)
+        self._refresh_channels()
+        if include_latest:
+            self._start_task("bootstrap", payload=channel.id)
+
+    def _on_bootstrap_channel(self, channel_id: int) -> None:
+        self._start_task("bootstrap", payload=channel_id)
+
+    def _on_bootstrap_from_field(self) -> None:
+        raw_id = self._channel_bootstrap_id.get().strip()
+        if not raw_id.isdigit():
+            self._log("Escribe el ID numérico del canal (ver lista arriba).")
+            return
+        self._channel_bootstrap_id.delete(0, "end")
+        self._on_bootstrap_channel(int(raw_id))
+
+    def _on_remove_channel(self) -> None:
+        from shorts_factory.domain.use_cases.remove_channel import ChannelNotFoundError
+
+        raw_id = self._channel_remove_id.get().strip()
+        if not raw_id.isdigit():
+            self._log("Escribe el ID numérico del canal a eliminar (ver lista arriba).")
+            return
+        container = Container(load_settings())
+        try:
+            deleted = container.remove_channel.execute(int(raw_id))
+        except ChannelNotFoundError as exc:
+            self._log(str(exc))
+            return
+        if deleted:
+            self._log(f"Canal #{raw_id} eliminado.")
+        else:
+            self._log(
+                f"Canal #{raw_id} tiene videos asociados: se desactivó en vez de"
+                " borrarse (deja de escanearse, conserva su historial)."
+            )
+        self._channel_remove_id.delete(0, "end")
         self._refresh_channels()
 
-    def _start_task(self, action: str) -> None:
+    def _start_task(self, action: str, payload=None) -> None:
         if self._busy:
             return
         titles = {
+            "bootstrap": "Encolando el video más reciente…",
             "scan": "Escaneando canales…",
             "download": "Descargando videos…",
             "analyze": "Analizando y cortando clips…",
             "publish": "Publicando en redes…",
+            "publish_selected": f"Publicando {len(payload or [])} clip(s) seleccionado(s)…",
             "cycle": "Ciclo completo en curso…",
         }
         self._set_busy(True, titles[action])
         self._log(titles[action])
-        threading.Thread(target=self._worker, args=(action,), daemon=True).start()
+        threading.Thread(target=self._worker, args=(action, payload), daemon=True).start()
 
-    def _worker(self, action: str) -> None:
+    def _worker(self, action: str, payload=None) -> None:
         """Corre en hilo aparte: contenedor propio (SQLite = conexión por hilo)."""
         try:
             container = Container(load_settings())
@@ -283,6 +371,14 @@ class App(ctk.CTk):
                         self._queue.put(
                             ("log", f"{r.channel_name}: {len(r.new_videos)} video(s) nuevo(s)")
                         )
+            elif action == "bootstrap":
+                video = container.bootstrap_channel.execute(payload)
+                if video:
+                    self._queue.put(
+                        ("log", f"Video encolado para descarga: {video.title} ({video.youtube_video_id})")
+                    )
+                else:
+                    self._queue.put(("log", "El canal no tiene videos públicos para encolar."))
             elif action == "download":
                 report = container.download_videos.execute()
                 self._queue.put(
@@ -303,6 +399,29 @@ class App(ctk.CTk):
                     self._queue.put(
                         ("log", f"Publicados: {len(report.published)} · Fallidos: {len(report.failed)}")
                     )
+            elif action == "publish_selected":
+                if not container.publishers:
+                    self._queue.put(
+                        ("log", "Sin plataformas habilitadas: define SF_PLATFORMS en .env")
+                    )
+                else:
+                    for clip_id in payload or []:
+                        report = container.publish_clips.execute(clip_id=clip_id)
+                        for pub in report.published:
+                            self._queue.put(
+                                (
+                                    "log",
+                                    f"OK clip {pub.clip_id} -> {pub.platform.value}: {pub.post_url}",
+                                )
+                            )
+                        for pub in report.failed:
+                            self._queue.put(
+                                (
+                                    "log",
+                                    f"FALLÓ clip {pub.clip_id} -> {pub.platform.value}"
+                                    f" (intento {pub.retry_count}): {pub.error_message}",
+                                )
+                            )
             elif action == "cycle":
                 report = container.run_pipeline.execute()
                 self._queue.put(

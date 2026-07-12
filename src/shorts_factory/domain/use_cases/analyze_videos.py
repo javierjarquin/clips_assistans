@@ -78,9 +78,12 @@ class AnalyzeVideos:
             return
 
         self._videos.update_status(video.id, VideoStatus.ANALYZING)
+        logger.info("Analizando %s: %s", video.youtube_video_id, video.title)
         try:
             transcript = self._inference.transcribe(raw_path, language=self._settings.language)
+            logger.info("%s: detectando picos de audio…", video.youtube_video_id)
             audio_peaks = self._audio.find_peaks(raw_path)
+            logger.info("%s: detectando cambios de escena…", video.youtube_video_id)
             scene_changes = self._scenes.detect_scene_changes(raw_path)
 
             duration = float(video.duration_seconds or 0)
@@ -103,7 +106,8 @@ class AnalyzeVideos:
             logger.info("%s: %d momento(s) candidatos", video.youtube_video_id, len(candidates))
 
             clips_dir = raw_path.parent / "clips"
-            for candidate in candidates:
+            total = len(candidates)
+            for i, candidate in enumerate(candidates, start=1):
                 moment = self._moments.add(
                     Moment(
                         video_id=video.id,
@@ -115,6 +119,11 @@ class AnalyzeVideos:
                 )
                 clip_path = clips_dir / f"clip_{moment.id:03d}.mp4"
                 clip = self._clips.add(Clip(moment_id=moment.id))
+                logger.info(
+                    "%s: cortando clip %d/%d (%.0fs-%.0fs, %s)…",
+                    video.youtube_video_id, i, total,
+                    candidate.start_seconds, candidate.end_seconds, candidate.reason,
+                )
                 try:
                     self._processor.cut_vertical(
                         raw_path, candidate.start_seconds, candidate.end_seconds, clip_path
@@ -128,6 +137,7 @@ class AnalyzeVideos:
                 clip.status = ClipStatus.READY
                 self._clips.update(clip)
                 report.clips_created += 1
+                logger.info("%s: clip %d/%d listo -> %s", video.youtube_video_id, i, total, clip_path.name)
 
             self._videos.update_status(video.id, VideoStatus.ANALYZED)
             report.analyzed.append(video)

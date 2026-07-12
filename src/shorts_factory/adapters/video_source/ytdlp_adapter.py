@@ -32,9 +32,15 @@ def channel_videos_url(youtube_channel_id: str) -> str:
 class YtDlpVideoSource(VideoSourcePort):
     name = "yt-dlp"
 
-    def __init__(self, extractor_args: dict | None = None, cookies_from_browser: str | None = None) -> None:
+    def __init__(
+        self,
+        extractor_args: dict | None = None,
+        cookies_from_browser: str | None = None,
+        ffmpeg_location: str | None = None,
+    ) -> None:
         self._extractor_args = extractor_args
         self._cookies_from_browser = cookies_from_browser
+        self._ffmpeg_location = ffmpeg_location
 
     def _base_opts(self) -> dict:
         opts: dict = {"quiet": True, "no_warnings": True, "noprogress": True}
@@ -42,6 +48,8 @@ class YtDlpVideoSource(VideoSourcePort):
             opts["extractor_args"] = self._extractor_args
         if self._cookies_from_browser:
             opts["cookiesfrombrowser"] = (self._cookies_from_browser,)
+        if self._ffmpeg_location:
+            opts["ffmpeg_location"] = self._ffmpeg_location
         return opts
 
     def list_recent_videos(self, youtube_channel_id: str, limit: int = 10) -> list[VideoMetadata]:

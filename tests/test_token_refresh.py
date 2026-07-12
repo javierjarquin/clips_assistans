@@ -1,7 +1,11 @@
-"""Tests del flujo de renovación de tokens de TikTok y X con HTTP simulado."""
+"""Tests del flujo de renovación de tokens de TikTok, X y Meta con HTTP simulado."""
 
 from pathlib import Path
 
+from shorts_factory.adapters.publishers.meta_adapter import (
+    FacebookReelsPublisher,
+    MetaTokenRefresher,
+)
 from shorts_factory.adapters.publishers.tiktok_adapter import TikTokPublisher
 from shorts_factory.adapters.publishers.x_adapter import XPublisher
 
@@ -119,3 +123,80 @@ def test_x_unconfigured_returns_clear_error(tmp_path: Path) -> None:
     outcome = XPublisher(None, None, None).publish(tmp_path / "x.mp4", "hola")
     assert outcome.success is False
     assert "client_id" in outcome.error
+
+
+def test_facebook_renews_expired_page_token_and_retries(tmp_path: Path) -> None:
+    """Meta no tiene refresh_token: el token de página se renueva bajo demanda
+    (tras un 190/OAuthException), re-derivándolo de un user token de larga
+    duración vía /me/accounts — a diferencia de TikTok/X, no en cada llamada.
+    """
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"video")
+    saved: list[dict] = []
+    starts: list[str] = []
+    session: FakeSession  # forward ref para el closure del route callable
+
+    def video_reels_route():
+        data = session.requests[-1][2]["data"]
+        if data["upload_phase"] != "start":
+            return FakeResponse({})
+        starts.append(data["access_token"])
+        if len(starts) == 1:  # primer intento: token viejo, Meta lo rechaza
+            return FakeResponse(
+                {"error": {"code": 190, "type": "OAuthException", "message": "Expired"}},
+                status=400,
+            )
+        return FakeResponse({"video_id": "v1"})
+
+    session = FakeSession(
+        {
+            "https://graph.facebook.com/v23.0/PAGE1/video_reels": video_reels_route,
+            "https://rupload.facebook.com/": FakeResponse({}),
+            "https://graph.facebook.com/v23.0/oauth/access_token": FakeResponse(
+                {"access_token": "user_largo"}
+            ),
+            "https://graph.facebook.com/v23.0/me/accounts": FakeResponse(
+                {"data": [{"id": "PAGE1", "access_token": "page_nuevo"}]}
+            ),
+        }
+    )
+    refresher = MetaTokenRefresher(
+        "app_id", "app_secret", "user_viejo", "PAGE1", "v23.0",
+        on_tokens=saved.append, session=session,
+    )
+    publisher = FacebookReelsPublisher(
+        "PAGE1", "page_viejo", "v23.0", token_refresher=refresher, session=session
+    )
+
+    outcome = publisher.publish(clip, "hola")
+
+    assert outcome.success is True
+    assert starts == ["page_viejo", "page_nuevo"]  # reintentó con el token renovado
+    assert saved == [
+        {"SF_META_USER_ACCESS_TOKEN": "user_largo", "SF_META_PAGE_ACCESS_TOKEN": "page_nuevo"}
+    ]
+
+
+def test_facebook_expired_token_without_refresher_fails_cleanly(tmp_path: Path) -> None:
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"video")
+    session = FakeSession(
+        {
+            "https://graph.facebook.com/v23.0/PAGE1/video_reels": FakeResponse(
+                {"error": {"code": 190, "type": "OAuthException", "message": "Expired"}},
+                status=400,
+            ),
+        }
+    )
+    publisher = FacebookReelsPublisher("PAGE1", "page_viejo", "v23.0", session=session)
+
+    outcome = publisher.publish(clip, "hola")
+
+    assert outcome.success is False
+    assert "400" in outcome.error
+
+
+def test_meta_refresher_without_credentials_cannot_refresh() -> None:
+    refresher = MetaTokenRefresher(None, None, None, None)
+    assert refresher.can_refresh() is False
+    assert refresher.refresh() is None

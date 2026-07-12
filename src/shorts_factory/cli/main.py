@@ -4,6 +4,8 @@ Etapa 0: `init` y `status` funcionan; el resto son esqueletos que se
 implementan en su etapa correspondiente del plan de ejecución.
 """
 
+import sys
+
 import typer
 
 from shorts_factory.infrastructure.config import load_settings
@@ -11,12 +13,20 @@ from shorts_factory.infrastructure.container import Container
 from shorts_factory.infrastructure.database import list_tables
 from shorts_factory.infrastructure.logging_config import setup_logging
 
+# Windows abre stdout/stderr con la codepage cp1252 por defecto: los títulos de
+# video con emoji (frecuentes en YouTube) rompen typer.echo con UnicodeEncodeError.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 app = typer.Typer(
     help="Shorts Factory — pipeline local de generación y publicación de Shorts/Reels.",
     no_args_is_help=True,
 )
 channel_app = typer.Typer(help="Gestión de canales monitoreados.", no_args_is_help=True)
 app.add_typer(channel_app, name="channel")
+media_app = typer.Typer(help="Gestión de archivos locales (videos y clips en disco).", no_args_is_help=True)
+app.add_typer(media_app, name="media")
 
 
 def _container() -> Container:
@@ -78,6 +88,10 @@ def channel_add(
     youtube_channel_id: str = typer.Argument(help="ID (UC...), handle (@nombre) o URL del canal"),
     name: str = typer.Option(..., "--name", "-n", help="Nombre del canal"),
     niche: str = typer.Option(None, "--niche", help="Nicho del canal (p. ej. reacciones)"),
+    include_latest: bool = typer.Option(
+        False, "--include-latest",
+        help="Encola ya el video más reciente para descargar, sin esperar a que el canal publique algo nuevo.",
+    ),
 ) -> None:
     """Registra un canal para monitorear."""
     from shorts_factory.domain.use_cases.register_channel import ChannelAlreadyExistsError
@@ -89,6 +103,53 @@ def channel_add(
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc
     typer.echo(f"Canal registrado #{channel.id}: {channel.name} ({channel.youtube_channel_id})")
+    if include_latest:
+        video = container.bootstrap_channel.execute(channel.id)
+        if video:
+            typer.echo(f"Video encolado para descarga: {video.title} ({video.youtube_video_id})")
+        else:
+            typer.echo("El canal no tiene videos públicos para encolar.")
+
+
+@channel_app.command("bootstrap")
+def channel_bootstrap(
+    channel_id: int = typer.Argument(help="ID numérico del canal (ver: shorts-factory channel list)"),
+) -> None:
+    """Encola el video más reciente de un canal ya registrado, sin esperar a que publique algo nuevo."""
+    from shorts_factory.domain.use_cases.bootstrap_channel import ChannelNotFoundError
+
+    container = _container()
+    try:
+        video = container.bootstrap_channel.execute(channel_id)
+    except ChannelNotFoundError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    if video:
+        typer.echo(f"Video encolado para descarga: {video.title} ({video.youtube_video_id})")
+    else:
+        typer.echo("El canal no tiene videos públicos para encolar.")
+
+
+@channel_app.command("remove")
+def channel_remove(
+    channel_id: int = typer.Argument(help="ID numérico del canal (ver: shorts-factory channel list)"),
+) -> None:
+    """Elimina un canal. Si ya tiene videos asociados, se desactiva en vez de borrarse."""
+    from shorts_factory.domain.use_cases.remove_channel import ChannelNotFoundError
+
+    container = _container()
+    try:
+        deleted = container.remove_channel.execute(channel_id)
+    except ChannelNotFoundError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    if deleted:
+        typer.echo(f"Canal #{channel_id} eliminado.")
+    else:
+        typer.echo(
+            f"Canal #{channel_id} tiene videos asociados: se desactivó en vez de"
+            " borrarse (deja de escanearse, pero conserva su historial)."
+        )
 
 
 @channel_app.command("list")
@@ -158,7 +219,11 @@ def analyze() -> None:
 
 
 @app.command()
-def publish() -> None:
+def publish(
+    clip_id: int = typer.Option(
+        None, "--clip", help="Publica solo este clip (ver: shorts-factory clips). Sin esto, publica todos los listos."
+    ),
+) -> None:
     """Publica los clips pendientes según la cola priorizada."""
     container = _container()
     if not container.publishers:
@@ -167,7 +232,7 @@ def publish() -> None:
             " (p. ej. facebook,instagram,tiktok,x) y sus credenciales."
         )
         raise typer.Exit(code=1)
-    report = container.publish_clips.execute()
+    report = container.publish_clips.execute(clip_id=clip_id)
     typer.echo(f"Encoladas: {report.enqueued}")
     for pub in report.published:
         typer.echo(f"OK  clip {pub.clip_id} -> {pub.platform.value}: {pub.post_url}")
@@ -178,6 +243,66 @@ def publish() -> None:
         )
     if not report.published and not report.failed and not report.enqueued:
         typer.echo("Sin publicaciones pendientes.")
+
+
+@app.command()
+def clips() -> None:
+    """Lista los clips listos para publicar: motivo, duración y en qué redes ya salieron."""
+    container = _container()
+    items = container.list_publishable_clips.execute()
+    if not items:
+        typer.echo("Sin clips listos. Corre primero: shorts-factory analyze")
+        return
+    if container.list_publishable_clips.should_suggest_waiting():
+        last = container.list_publishable_clips.last_published_at()
+        typer.echo(f"⚠ Ya se publicó algo hace menos de 24h (última: {last}). Sugerencia: 1 por día.\n")
+    for c in items:
+        estado = "✔ archivo OK" if c.file_exists else "✘ archivo no encontrado"
+        redes = ", ".join(sorted(c.published_on)) or "ninguna"
+        typer.echo(
+            f"#{c.clip_id} [{c.channel_name}] {c.video_title} ({c.duration_seconds:.0f}s,"
+            f" score={c.impact_score:.2f}, {c.reason}) — {estado} — publicado en: {redes}"
+        )
+
+
+@media_app.command("list")
+def media_list() -> None:
+    """Lista los videos con su tamaño en disco (raw.mp4 + clips) y qué falta."""
+    container = _container()
+    assets = container.list_media_assets.execute()
+    if not assets:
+        typer.echo("Sin videos registrados.")
+        return
+    total = sum(a.total_size_bytes for a in assets)
+    typer.echo(f"{len(assets)} video(s) · {total / (1024 * 1024):.1f} MB en disco\n")
+    for a in assets:
+        raw_bit = "✔ raw.mp4" if a.raw_exists else "✘ sin raw.mp4"
+        existing = sum(1 for c in a.clips if c.exists)
+        typer.echo(
+            f"#{a.video_id} [{a.channel_name}] {a.title} — {a.status} — {raw_bit}"
+            f" — clips: {existing}/{len(a.clips)} en disco"
+            f" — {a.total_size_bytes / (1024 * 1024):.1f} MB"
+        )
+
+
+@media_app.command("remove")
+def media_remove(
+    video_id: int = typer.Argument(help="ID numérico del video (ver: shorts-factory media list)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="No pedir confirmación"),
+) -> None:
+    """Borra raw.mp4 + clips de un video en disco y su historial en la BD. No se puede deshacer."""
+    container = _container()
+    if not yes:
+        confirm = typer.confirm(
+            f"¿Borrar el video #{video_id} (archivos en disco + historial en la BD)?"
+        )
+        if not confirm:
+            raise typer.Abort()
+    had_files = container.delete_video_files.execute(video_id)
+    typer.echo(
+        f"Video #{video_id} eliminado"
+        + (" (con archivos en disco)." if had_files else " (solo el registro, sin archivos).")
+    )
 
 
 @app.command()
