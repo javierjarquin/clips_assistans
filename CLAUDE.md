@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Mapa del sistema de **Dato Mata Gato** (canal de TikTok/Facebook de Javier), para no tener que explorar. Actualizado el 15/10/2026. Responde siempre en español.
+Mapa del sistema de **Dato Mata Gato** (canal de TikTok/Facebook de Javier), para no tener que explorar. Actualizado el 14/10/2026. Responde siempre en español.
 
 ## Dónde está cada cosa
 
