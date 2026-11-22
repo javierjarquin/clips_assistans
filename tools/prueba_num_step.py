@@ -104,8 +104,8 @@ def correr(slugs: list[str]) -> None:
             dur = duracion(wav)
             clave[str(n)][letra] = {"num_step": pasos, "segundos_generando": round(seg, 1),
                                     "segundos_de_audio": round(dur, 1), "veces_tiempo_real": round(seg / dur, 1)}
-            print(f"{n} {letra}: {pasos} pasos, {seg:.0f} s para {dur:.1f} s de audio ({seg / dur:.1f}x)",
-                  flush=True)
+            # Sin la letra: el que vota no debe saber cuál es cuál
+            print(f"{n}: {pasos} pasos, {seg:.0f} s para {dur:.1f} s de audio ({seg / dur:.1f}x)", flush=True)
     (SALIDA / "clave.json").write_text(json.dumps(clave, ensure_ascii=False, indent=1), encoding="utf-8")
     votos = SALIDA / "votos.csv"
     if not votos.exists():
